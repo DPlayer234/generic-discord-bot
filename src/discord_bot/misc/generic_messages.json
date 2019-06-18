@@ -1,0 +1,27 @@
+{
+	"request_timeout": [
+		"Sorry, I do not have enough time for this. Time-out.",
+		"Time-out. Make up your mind before christmas.",
+		"Time-out. Make up your mind before easter.",
+		"Why do you take so long? Time-out."
+	],
+	"canceled": [
+		"Well, canceled.",
+		"Canceled.",
+		"Whatever then."
+	],
+	"try_again": [
+		"Try again."
+	],
+	"hello": [
+		"Hello!",
+		"What might you request from me?",
+		"Is everything alright?"
+	],
+	"confirm": [
+		"Confirm? (y/n)"
+	],
+	"confirm_both": [
+		"Confirm? (Both need to type y/n)"
+	]
+}
