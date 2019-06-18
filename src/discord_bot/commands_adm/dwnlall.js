@@ -18,6 +18,10 @@ const writeOptions = {
 	encoding: 'binary'
 };
 
+const MAP_ATT_URL = a => a.proxyURL;
+const MAP_EMB_URL = e => e.image ? e.image.proxyURL : null;
+const TRUTHY = v => v;
+
 function downloadFile(urlStr, fileName) {
 	return new Promise((resolve, reject) => {
 		const url = new URL(urlStr);
@@ -36,24 +40,24 @@ function downloadFile(urlStr, fileName) {
 	});
 }
 
-async function downloadMessage(message, root) {
-	const att = message.attachments.first();
-	const embed = message.embeds[0];
-
-	const url = att ? att.proxyURL
-		: embed && embed.image ? embed.image.proxyURL
-		: null;
-
-	if (url) {
-		try {
-			const fileName = path.join(root, message.id + getExt(url));
-			return await downloadFile(url, fileName);
-		}
-		catch (e) {
-			console.error(e);
-			return downloadMessage(message, root);
-		}
+async function forceDownloadFile(urlStr, fileName) {
+	try {
+		return await downloadFile(urlStr, fileName);
 	}
+	catch (e) {
+		console.error(e);
+		return forceDownloadFile(urlStr, fileName);
+	}
+}
+
+async function downloadMessage(message, root) {
+	return [
+		...message.attachments.map(MAP_ATT_URL),
+		...message.embeds.map(MAP_EMB_URL)
+	].filter(TRUTHY).map((url, i) => {
+		const fileName = path.join(root, `${message.id}-${i}${getExt(url)}`);
+		return forceDownloadFile(url, fileName);
+	});
 }
 
 function getExt(fname) {
