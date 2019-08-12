@@ -4,7 +4,8 @@ const commandName = '%js';
 
 module.exports = {
 	name: commandName,
-	category: '-',
+	category: null,
+	admin: true,
 	desc: 'Executes JavaScript code on the bot.\n' +
 		'The code will have "bot", "client", "channel" and "user" as variables available.\n' +
 		'THIS IS A DANGEROUS COMMAND AND AS SUCH CAN ONLY BE USED BY ADMINS!',

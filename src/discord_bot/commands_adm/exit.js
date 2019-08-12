@@ -3,6 +3,7 @@ const Discord = require('discord.js');
 module.exports = {
 	name: '%exit',
 	category: 'Admin',
+	admin: true,
 	desc: 'Exits the application.',
 	args: [],
 	async func({ author, channel }, target, amount) {

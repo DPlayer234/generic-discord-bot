@@ -2,7 +2,8 @@ const Discord = require('discord.js');
 
 module.exports = {
 	name: '%error',
-	category: '-',
+	category: null,
+	admin: true,
 	desc: 'Throws an error.',
 	args: Array,
 	argDesc: '<message>',

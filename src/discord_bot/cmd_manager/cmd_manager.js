@@ -1,8 +1,7 @@
 const Discord = require('discord.js');
 const wait = require('../../libs/wait');
 
-const emojiDefs = require('../misc/emoji_defs');
-
+const Command = require('./command');
 const CmdError = require('./cmd_error');
 
 const helpCmds = require('./help_cmd');
@@ -17,9 +16,20 @@ const toBool = (str) => {
 		: null;
 };
 
+const arrayEq = (types1, types2) => {
+	if (types1 === types2) return true;
+	if (types1.length !== types2.length) return false;
+
+	for (let i = 0; i < types1.length; i++) {
+		if (types1[i] !== types2[i]) return false;
+	}
+
+	return true;
+};
+
 const MAX_ARGS = 4;
 
-const ARG_TYPES = [Discord.User, Number, Boolean, String];
+const ARG_TYPES = [Discord.User, Discord.Channel, Number, Boolean, String];
 const ARG_PRIO = new Map(ARG_TYPES.map((t, i) => [t, i]));
 
 const ARG_PRIO_SORT = (a, b) => {
@@ -41,7 +51,8 @@ const CAST_NAMES = [
 	[String, '$cast_String'],
 	[Boolean, '$cast_Boolean'],
 	[Number, '$cast_Number'],
-	[Discord.User, '$cast_DiscordUser']
+	[Discord.User, '$cast_DiscordUser'],
+	[Discord.Channel, '$cast_DiscordChannel']
 ];
 
 const ADMINS = new Set(['124561134278672387']);
@@ -56,6 +67,8 @@ class CmdManager {
 		this.commands = new Map();
 		this.aliases = new Map();
 		this.commandsByName = new Map();
+
+		this.uniqueCommands = [];
 
 		this.casts = new Map(CAST_NAMES.map(e => [e[0], this[e[1]].bind(this)]));
 
@@ -81,6 +94,125 @@ class CmdManager {
 
 	async fetchPrefix(guild) {
 		return this.prefix;
+	}
+
+	async runCommand(message, prefix) {
+		try {
+			const parsed = await this.parseCommand(message.content, prefix);
+			if (!parsed) return;
+
+			const { command, args } = parsed;
+			console.log(`[${new Date().toLocaleTimeString()}][${message.channel.name || 'DM'}] ${message.author.username}: ${message.content}`);
+			await command.func(message, ...args);
+		}
+		catch (err) {
+			return this.handleCmdError(message, err);
+		}
+	}
+
+	async parseCommand(str, prefix) {
+		if (!str.startsWith(prefix)) return null;
+
+		const args = str.slice(prefix.length).split(/\s+/);
+		const name = args.shift().toLowerCase();
+
+		const cmdKey = this._getCmdKey(name, args);
+		const commands = this.commands.get(cmdKey) || this.aliases.get(cmdKey)
+			|| this.commands.get(name) || this.aliases.get(name);
+
+		if (!commands) {
+			throw this.commandsByName.has(name)
+				? new CmdError('INVALID_ARGS', `This command does not take ${args.length} argument(s). Type \`${prefix}help ${name}\` for help.`)
+				: new CmdError('INVALID_COMMAND', `Use \`${prefix}help\` to get a list of all commands.`);
+		}
+
+		let lastError, lastIndex = -1;
+
+		for (const command of commands) {
+			const result = await this._parseCommand(command, args);
+
+			if (!result.error) {
+				return result;
+			}
+			else if (result.index > lastIndex) {
+				lastError = result.error;
+				lastIndex = result.index;
+			}
+		}
+
+		throw lastError || new Error('No command...?');
+	}
+
+	findCommand(name, args) {
+		const cmdKey = this._getCmdKey(name, args);
+		const commands = this.commands.get(cmdKey) || this.commands.get(name);
+
+		if (!commands) throw new TypeError(`There is no command by the name '${name}'.`);
+
+		for (const command of commands) {
+			if (arrayEq(command.args, args)) {
+				return command;
+			}
+		}
+
+		throw new TypeError(`There is no variant of '${name}' matching the suplied argument types.`);
+	}
+
+	async cast(type, str, i) {
+		return this.casts.get(type)(str, i);
+	}
+
+	canCast(type) {
+		return this.casts.has(type);
+	}
+
+	eqArgTransform(args) {
+		const map = new Map();
+		if (args.length === 0) return map;
+
+		let key, value;
+		for (let i = 0; i < args.length; i++) {
+			const arg = args[i];
+			const eqI = arg.indexOf('=');
+			if (eqI === -1) {
+				if (value === undefined) throw new CmdError('INVALID_ARGS', `I don't understand that. Give me *key=value* pairs.`);
+				value = `${value} ${arg}`;
+			}
+			else {
+				if (key) {
+					if (map.has(key)) throw new CmdError('INVALID_ARGS', 'A key was given multiple times.');
+					map.set(key, value);
+				}
+
+				key = arg.slice(0, eqI);
+				value = arg.slice(eqI + 1);
+			}
+		}
+
+		if (!key) throw new CmdError('INVALID_ARGS', `I don't understand that. Give me *key=value* pairs.`);
+		if (map.has(key)) throw new CmdError('INVALID_ARGS', 'A key was given multiple times.');
+		map.set(key, value);
+
+		return map;
+	}
+
+	async castRange(str, i) {
+		const result = [undefined, undefined];
+		const rMatch = str.match(/^([0-9]+)?\.\.([0-9]+)?$/);
+
+		if (rMatch) {
+			let [_, minValue, maxValue] = rMatch;
+			if (minValue === undefined && maxValue === undefined) throw new CmdError('INVALID_ARGS', `Invalid option ${i}. Needs to be a number or range.`);
+			if (minValue !== undefined) result[0] = await this.cast(Number, minValue, i);
+			if (maxValue !== undefined) result[1] = await this.cast(Number, maxValue, i);
+		}
+		else {
+			const value = await this.cast(Number, str, i);
+			result[0] = value;
+			result[1] = value;
+		}
+
+		return result;
 	}
 
 	async requestConfirmation(channel, author) {
@@ -117,97 +249,6 @@ class CmdManager {
 		return result;
 	}
 
-	async runCommand(message, prefix) {
-		try {
-			const parsed = await this.parseCommand(message.content, prefix);
-			if (!parsed) return;
-
-			const { command, args } = parsed;
-			console.log(`[${new Date().toLocaleTimeString()}][${message.channel.name || 'DM'}] ${message.author.username}: ${message.content}`);
-			await command.func.call(this, message, ...args);
-		}
-		catch (err) {
-			return this.handleCmdError(message, err);
-		}
-	}
-
-	async parseCommand(str, prefix) {
-		if (!str.startsWith(prefix)) return null;
-
-		const args = str.slice(prefix.length).split(/\s+/);
-		const name = args.shift().toLowerCase();
-		const cmdKey = this._getCmdKey(name, args);
-		const commands = this.commands.get(cmdKey) || this.aliases.get(cmdKey) || this.commands.get(name) || this.aliases.get(name);
-		if (!commands) {
-			throw this.commandsByName.has(name)
-				? new CmdError('INVALID_ARGS', `This command does not take ${args.length} argument(s). Type \`${prefix}help ${name}\` for help.`)
-				: new CmdError('INVALID_COMMAND', `Use \`${prefix}help\` to get a list of all commands.`);
-		}
-
-		let lastError, lastIndex = -1;
-
-		for (const command of commands) {
-			const result = await this._parseCommand(command, args);
-
-			if (!result.error) {
-				return result;
-			}
-			else if (result.index > lastIndex) {
-				lastError = result.error;
-				lastIndex = result.index;
-			}
-		}
-
-		throw lastError || new Error('No command...?');
-	}
-
-	async cast(type, str, i) {
-		return this.casts.get(type)(str, i);
-	}
-
-	canCast(type) {
-		return this.casts.has(type);
-	}
-
-	eqArgTransform(args) {
-		if (args.length < 2) return args;
-		const modArgs = [];
-
-		let subArg = args[0];
-		for (let i = 1; i < args.length; i++) {
-			const arg = args[i];
-			if (!arg.includes('=')) {
-				subArg = `${subArg} ${arg}`;
-			}
-			else {
-				modArgs.push(subArg);
-				subArg = arg;
-			}
-		}
-		modArgs.push(subArg);
-
-		return modArgs;
-	}
-
-	async castRange(str, i) {
-		const result = [undefined, undefined];
-		const rMatch = str.match(/^([0-9]+)?\.\.([0-9]+)?$/);
-
-		if (rMatch) {
-			let [_, minValue, maxValue] = rMatch;
-			if (minValue === undefined && maxValue === undefined) throw new CmdError('INVALID_ARGS', `Invalid option ${i}. Needs to be a number or range.`);
-			if (minValue !== undefined) result[0] = await this.cast(Number, minValue, i);
-			if (maxValue !== undefined) result[1] = await this.cast(Number, maxValue, i);
-		}
-		else {
-			const value = await this.cast(Number, str, i);
-			result[0] = value;
-			result[1] = value;
-		}
-
-		return result;
-	}
-
 	async assertAdmin(user) {
 		if (!ADMINS.has(user.id)) throw new CmdError('CUSTOM', 'You are not allowed to do this.');
 	}
@@ -229,13 +270,9 @@ class CmdManager {
 		return message.channel.send(`An internal error has occured: \`\`\`${err.stack.slice(0, 1500)}\`\`\``);
 	}
 
-	registerCommand({ name, desc, category, args, argDesc, argC, func, aliases }, check = true) {
-		category = category || 'Uncategorized';
-		desc = desc || 'No Description.';
-		args = args || [];
-		aliases = aliases || [];
-
-		const cmd = { name, desc, category, args, argDesc, argC, func, aliases };
+	registerCommand(options, check = true) {
+		const cmd = new Command(options, this);
+		const { name, args, aliases } = cmd;
 
 		this._validateCmd(cmd);
 
@@ -248,6 +285,8 @@ class CmdManager {
 		}
 
 		if (check) this._checkArrayCmds();
+
+		this.uniqueCommands.push(cmd);
 	}
 
 	registerCommands(cmds) {
@@ -263,11 +302,13 @@ class CmdManager {
 	}
 
 	_validateCmd({ args, name }) {
+		if (name.includes(' ') || name !== name.toLowerCase()) throw new Error(`The command name ${name} isn't valid.`);
+
 		if (args === Array) return;
-		if (args.length > MAX_ARGS) throw new Error(`The command has too many arguments: \`${name}-${args.length}\``);
+		if (args.length > MAX_ARGS) throw new Error(`The command has too many arguments: ${name}-${args.length}`);
 
 		for (let i = 0; i < args.length; i++) {
-			if (!this.canCast(args[i])) throw new Error(`The command argument definition is invalid: \`${name}-${args.length}[${i}]\``);
+			if (!this.canCast(args[i])) throw new Error(`The command argument definition is invalid: ${name}-${args.length}[${i}]`);
 		}
 	}
 
@@ -337,7 +378,7 @@ class CmdManager {
 
 	async $cast_Boolean(str, i) {
 		let bool = toBool(str);
-		if (bool === null) throw new CmdError('INVALID_ARGS', `I need true/false/yes/no as argument ${i}.`);
+		if (bool === null) throw new CmdError('INVALID_ARGS', `I need true/false/yes/no/on/off as argument ${i}.`);
 		return bool;
 	}
 
@@ -350,12 +391,27 @@ class CmdManager {
 	async $cast_DiscordUser(str, i) {
 		try {
 			// str = this._fetchIdByTag(str) || str;
-			const uMatch = str.match(/<@!?([0-9]{18})>/);
-			if (!uMatch && str.length !== 18) throw null;
+			const uMatch = str.match(/^<@!?([0-9]+)>$/);
+			if (!uMatch && str.length < 9) throw null;
 			return await this.client.fetchUser(uMatch ? uMatch[1] : str);
 		}
 		catch (e) {
 			throw new CmdError('INVALID_ARGS', `I need a user as argument ${i}.`);
+		}
+	}
+
+	async $cast_DiscordChannel(str, i) {
+		try {
+			const uMatch = str.match(/^<#([0-9]+)>$/);
+			if (!uMatch && str.length < 9) throw null;
+			const id = uMatch ? uMatch[1] : str;
+			if (!this.client.channels.has(id)) throw null;
+			const channel = this.client.channels.get(id);
+			if (channel.type !== 'text') throw null;
+			return channel;
+		}
+		catch (e) {
+			throw new CmdError('INVALID_ARGS', `I need a channel as argument ${i}.`);
 		}
 	}
 
@@ -372,6 +428,7 @@ class CmdManager {
 	*/
 }
 
-CmdManager.CmdError = CmdManager.prototype.CmdError = CmdError;
+CmdManager.Command = Command;
+CmdManager.CmdError = CmdError;
 
 module.exports = CmdManager;

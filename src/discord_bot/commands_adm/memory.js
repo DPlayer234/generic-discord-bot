@@ -5,6 +5,7 @@ const formatMemory = (value) => (value / (1024 * 1024)).toFixed(3);
 module.exports = {
 	name: '%memory',
 	category: 'Admin',
+	admin: true,
 	desc: 'Displays memory usage.',
 	async func({ author, channel, guild }) {
 		const { rss, heapTotal, heapUsed, external } = process.memoryUsage();
