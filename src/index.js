@@ -1,5 +1,6 @@
 const Discord = require('discord.js');
 const DiscordBot = require('./discord_bot');
+const RoastBot = require('./roast_bot');
 
 const client = new Discord.Client();
 client.login(process.env.BOT_TOKEN);
@@ -8,9 +9,12 @@ const bot = new DiscordBot(client, {
 	ownerId: process.env.OWNER_USER_ID
 });
 
+const roastBot = new RoastBot(client);
+
 global.client__ = client;
 global.bot__ = bot;
 
+/*
 client.on('ready', () => {
 	const SimpleHall = require('./simple_hall');
 
@@ -28,3 +32,4 @@ client.on('ready', () => {
 
 	hall.on('copy', (main, hall) => console.log(`Copy: ${main.id} >> ${hall.id}`));
 });
+*/

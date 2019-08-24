@@ -73,8 +73,6 @@ module.exports = {
 		}
 
 		async function fetchReactions(message) {
-			console.log(`Fetching reactions of ${message.id}...`);
-
 			for (const reaction of message.reactions.values()) {
 				const key = reaction.emoji.id || reaction.emoji.name;
 				const userIds = await fetchReactionUsers(reaction);
@@ -85,6 +83,8 @@ module.exports = {
 					ms.push(message.id);
 				}
 			}
+
+			console.log(`Fetched reactions of ${message.id}`);
 		}
 
 		async function fetchReactionUsers(reaction) {
